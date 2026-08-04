@@ -1,0 +1,102 @@
+# ==============================================================================
+# POWERLINE PROMPT (optimized)
+# ==============================================================================
+
+# Stop Python venv activation from prepending its own "(venv)" text to PS1;
+# we render that ourselves in Segment 0 below.
+export VIRTUAL_ENV_DISABLE_PROMPT=1
+
+# Build the Git segment: branch name + a compact status flag string.
+# Runs `git status --porcelain` once and reuses it for every check (was 3x grep+echo forks before).
+prompt_git_segment() {
+    # Skip entirely (fast, no output) if we're not inside a git work tree.
+    git rev-parse --is-inside-work-tree &>/dev/null || return
+
+    local git_status='' branchName='' gitSummary
+    gitSummary=$(git status --porcelain 2>/dev/null)
+
+    # Single bash regex scan (no external grep/echo pipes) to detect
+    # staged (col 1), unstaged (col 2), and untracked ("??") changes.
+    [[ $gitSummary =~ (^|$'\n')[^[:space:]?] ]] && git_status+='+'
+    [[ $gitSummary =~ (^|$'\n').[^[:space:]] ]] && git_status+='!'
+    [[ $gitSummary == *$'\n??'* || $gitSummary == '??'* ]] && git_status+='?'
+
+    # Stash presence is cheap to check directly via rev-parse.
+    git rev-parse --verify refs/stash &>/dev/null && git_status+='$'
+
+    # Prefer the branch name; fall back to short SHA (detached HEAD), then '(unknown)'.
+    branchName="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo '(unknown)')"
+
+    # Wrap the flag string in brackets only if something is actually set.
+    [ -n "$git_status" ] && git_status=" [${git_status}]"
+    echo "${branchName}${git_status}"
+}
+
+powerline_prompt() {
+    # Must be captured FIRST — any command below would overwrite $?.
+    local EXIT="$?"
+
+    # Single reusable Powerline right-arrow glyph for all segment transitions.
+    local ARROW=$'\uE0B4'
+
+    # Reset + one shared "white text" color used across every segment.
+    local FG_WHITE="\[\e[38;5;231m\]"
+    local RESET="\[\e[0m\]"
+
+    # Foreground/background pairs, one per segment color (success, fail, dir, git, host, venv).
+    local BG_SUCCESS="\[\e[48;5;178m\]" FG_SUCCESS="\[\e[38;5;178m\]"   # Yellow
+    local BG_FAIL="\[\e[48;5;124m\]"    FG_FAIL="\[\e[38;5;124m\]"     # Red
+    local BG_DIR="\[\e[48;5;161m\]"     FG_DIR="\[\e[38;5;161m\]"      # Purple
+    local BG_GIT="\[\e[48;5;91m\]"      FG_GIT="\[\e[38;5;91m\]"       # Muted gray
+    local BG_HOST="\[\e[48;5;35m\]"     FG_HOST="\[\e[38;5;35m\]"      # Green
+    local BG_VENV="\[\e[48;5;208m\]"    FG_VENV="\[\e[38;5;208m\]"     # Orange (dupe "Steel Blue" var removed)
+
+    # Cursor-line color, applied only to what you type, not the prompt itself.
+    local FG_MINT="\[\e[38;5;49m\]"
+
+    # Segment 0: shown only inside an active Python virtualenv.
+    local SEG0="" LAST_BG="$BG_DIR"
+    if [ -n "$VIRTUAL_ENV" ]; then
+        local venv_name
+        venv_name=$(basename "$VIRTUAL_ENV")
+        SEG0="${BG_VENV}${FG_WHITE}  (${venv_name})${BG_SUCCESS}${FG_VENV}${ARROW}"
+        LAST_BG="$BG_VENV"
+    fi
+
+    # Segment 1: username block; color flips yellow/red based on last exit code.
+    local SEG1
+    if [ "$EXIT" -eq 0 ]; then
+        SEG1="${BG_SUCCESS}${FG_WHITE} \u ${BG_DIR}${FG_SUCCESS}${ARROW}"
+    else
+        SEG1="${BG_FAIL}${FG_WHITE} \u ${BG_DIR}${FG_FAIL}${ARROW}"
+    fi
+
+    # Segment 2: current working directory, purple background.
+    local SEG2="${FG_WHITE} \w "
+
+    # Segment 3: only appended when inside a git repo; extends SEG2 with an arrow first.
+    local SEG3="" NEXT_BG="${BG_HOST}" CURRENT_FG="${FG_DIR}"
+    local GIT_INFO
+    GIT_INFO=$(prompt_git_segment)
+    if [ -n "$GIT_INFO" ]; then
+        SEG2+="${BG_GIT}${FG_DIR}${ARROW}"
+        SEG3="${FG_WHITE}  ${GIT_INFO} "
+        CURRENT_FG="${FG_GIT}"
+    fi
+
+    # Segment 4: hostname block; arrow color depends on whether git segment ran.
+    local SEG4="${NEXT_BG}${CURRENT_FG}${ARROW}${FG_WHITE} \h ${RESET}${FG_HOST}${ARROW}${RESET}"
+
+    # Final line: newline + "$ " prompt, typed input rendered in mint green.
+    local INPUT_LINE="\n$ ${FG_MINT}"
+
+    # Stitch every segment together into the actual prompt string.
+    PS1="${SEG0}${SEG1}${SEG2}${SEG3}${SEG4}${INPUT_LINE}"
+}
+
+# Right before each command runs, reset terminal color so typed input
+# isn't stuck in mint green forever.
+trap 'echo -ne "\e[0m"' DEBUG
+
+# Rebuild PS1 via powerline_prompt before every prompt is displayed.
+PROMPT_COMMAND=powerline_prompt
