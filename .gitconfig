@@ -1,0 +1,12 @@
+[user]
+	email = rishikesh.aac@gmail.com
+	name = Rishikesh Kumbhar
+[credential "https://git.heroku.com"]
+	helper = !heroku git:credentials
+[filter "lfs"]
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+	required = true
+	clean = git-lfs clean -- %f
+[alias]
+	st = status --porcelain
